@@ -19,7 +19,9 @@ library
   build-depends:     base,
                      download-curl,
                      parsec,
-                     aeson
+                     aeson,
+                     text,
+                     bytestring
   ghc-options:       -Wall
 
 executable Baseball
