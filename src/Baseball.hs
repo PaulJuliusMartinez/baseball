@@ -6,33 +6,57 @@ import Control.Concurrent
 import Data.Aeson
 import qualified Data.ByteString.Lazy.Char8 as C
 import Data.Text
-import System.Environment
 import Network.Curl.Download as Curl
 import Text.Parsec
 import Text.Parsec.ByteString.Lazy
+import System.Environment
 
+import Graphics.UI.Gtk
+import Graphics.UI.Gtk.Glade
+import Popup
+import GameCastData
+
+import Control.Concurrent.MVar
 main :: IO ()
-main = do site <- liftM (!! 0) getArgs
-          printRecentPlays site 0
+main = do
+  exit <- newEmptyMVar
+  _ <- initGUI
+  Just xml <- xmlNew "res/atbat.glade"
+  _ <- forkOS mainGUI
+  _ <- forkIO $ do
+    site <- liftM (!! 0) getArgs
+    printRecentPlays site 0 xml
+    putMVar exit "ExitSuccess"
 
-printRecentPlays :: String -> Int -> IO ()
-printRecentPlays url latest = do
-  recentPlays <- getRecentPlays url latest
-  mapM_ (\p -> putStrLn $ unpack $ playResult p) (Prelude.reverse recentPlays)
+  _ <- takeMVar exit
+  return ()
+
+printRecentPlays :: String -> Int -> GladeXML -> IO ()
+printRecentPlays url latest xml = do
+  (state, recentPlays) <- getRecentPlays url latest
+  -- mapM_ (\p -> putStrLn $ unpack $ playResult p) (Prelude.reverse recentPlays)
+  createAtBatWindow state recentPlays xml
   let newLatest = case recentPlays of
                     [] -> latest
-                    (x:_) -> pID x
-  threadDelay 30000000
-  printRecentPlays url newLatest
+                    (x:_) -> atbatID x
+  putStrLn $ "Updated up to " ++ (show newLatest)
+  threadDelay 20000000
+  printRecentPlays url newLatest xml
 
-getRecentPlays :: String -> Int -> IO [Play]
+getRecentPlays :: String -> Int -> IO (Current, [Play])
 getRecentPlays url latest = do
   putStrLn "FETCHING DATA..."
   webData <- getWebData url
   let parsedData = parseGameData webData
   case parsedData of
-    ParseFailure -> return []
-    gcdData -> return $ Prelude.takeWhile ((> latest) . pID) (plays gcdData)
+    ParseFailure -> return (NoState, [])
+    gcdData -> do
+      let mostRecentPlays = Prelude.takeWhile ((>= latest) . atbatID) (plays gcdData)
+      if Prelude.null mostRecentPlays
+        then return (current gcdData, [])
+        else do
+          let mostRecent = atbatID (mostRecentPlays !! 0)
+          return $ (current gcdData, Prelude.takeWhile ((== mostRecent) . atbatID) mostRecentPlays)
 
 {- Fetch the Gamecast source HTML, then find the JSON of the game data
  - and returns it as a single string. -}
@@ -59,48 +83,3 @@ parseGameData :: C.ByteString -> GameCastData
 parseGameData input = case decode input of
                         Nothing -> ParseFailure
                         (Just gameData) -> gameData
-
-data GameCastData = ParseFailure | GameCastData
-  { snapshotId :: Int
-  , sessionId :: Text
-  , plays :: [Play]
-  } deriving Show
-
-data Play = Play
-  { pID :: Int
-  , atbatID :: Int
-  , playResult :: Text
-  , balls :: Int
-  , strikes :: Int
-  , outs :: Int
-  , isResult :: Bool
-  , inningText :: Text
-  -- , pitcher :: PlayerRef -- <- These are maybes!
-  -- , batter :: PlayerRef -- <- These are maybes!
-  , pitchXCoord :: Int
-  , pitchYCoord :: Int
-  , velocity :: Text
-  } deriving Show
-
-instance FromJSON GameCastData where
-  parseJSON (Object v) = GameCastData <$> v .: "snapshotId"
-                                      <*> v .: "sessionId"
-                                      <*> v .: "plays"
-  parseJSON _          = mzero
-
-{-- Have to do custom FromJSON because it has an 'id' field --}
-instance FromJSON Play where
-  parseJSON (Object v) = Play <$> v .: "id"
-                              <*> v .: "atbatId"
-                              <*> v .: "playResult"
-                              <*> v .: "balls"
-                              <*> v .: "strikes"
-                              <*> v .: "outs"
-                              <*> v .: "isResult"
-                              <*> v .: "inningText"
-                              -- <*> v .: "pitcher"
-                              -- <*> v .: "batter"
-                              <*> v .: "pitchXCoord"
-                              <*> v .: "pitchYCoord"
-                              <*> (v .:? "velocity" .!= "NO PITCH VELOCITY DATA")
-  parseJSON _          = mzero

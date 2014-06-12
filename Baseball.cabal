@@ -14,18 +14,23 @@ build-type:          Simple
 cabal-version:       >=1.8
 
 library
-  exposed-modules:   Baseball
+  exposed-modules:   Baseball Popup GameCastData
   hs-source-dirs:    src
   build-depends:     base,
                      download-curl,
                      parsec,
                      aeson,
                      text,
-                     bytestring
-  ghc-options:       -Wall
+                     bytestring,
+                     gtk,
+                     glade,
+                     directory,
+                     process
+  ghc-options:       -threaded -Wall
 
 executable Baseball
   main-is: src/Main.hs
   -- other-modules:
   build-depends:     base ==4.6.*,
                      Baseball
+  ghc-options:       -threaded -Wall
